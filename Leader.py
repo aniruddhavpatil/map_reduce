@@ -6,53 +6,53 @@ import multiprocessing as mp
 import time
 # import rpc.Client.Client as Client
 
-class Master:
+class Leader:
     def __init__(self, networkConfig, methods):
-        self.server = Server(networkConfig, [self.startMapper, self.stopMapper, *methods])
-        self.mapperCount = 0
-        self.reducerCount = 0
+        self.server = Server(networkConfig, [self.start_mapper, self.stop_mapper, *methods])
+        self.mapper_count = 0
+        self.reducer_count = 0
 
-    def startMapper(self):
+    def start_mapper(self):
         print('Start Mapper')
-        self.mapperCount += 1
+        self.mapper_count += 1
 
-    def stopMapper(self, id):
+    def stop_mapper(self, id):
         print('Stopping Mapper')
-        self.mapperCount -= 1
+        self.mapper_count -= 1
 
     def run(self):
         # self.server.run()
-        self.serverProcess = mp.Process(target=self.server.run)
-        print('Starting Master')
-        self.serverProcess.start()
-        # serverProcess.join()
+        self.server_process = mp.Process(target=self.server.run)
+        print('Starting Leader')
+        self.server_process.start()
+        # server_process.join()
         # print('Stopping Master')
 
     def stop(self):
-        print('Stopping Master')
-        self.serverProcess.terminate()
-        self.serverProcess.join()
-        self.serverProcess.close()
+        print('Stopping Leader')
+        self.server_process.terminate()
+        self.server_process.join()
+        self.server_process.close()
 
 def myFunc(i):
     print(i)
 
 def main():
-    master = Master(('localhost', 8000), [myFunc])
-    master.run()
+    leader = Leader(('localhost', 8000), [myFunc])
+    leader.run()
     mapper = Client(('localhost', 8000))
 
     processes = []
     for i in range(5):
-        processes.append(mp.Process(target=mapper.run, args=('myFunc', i,)))
+        processes.append(mp.Process(target=mapper.run, args=('myFunc', 'mapper:' +str(i),)))
     # print('Starting Mapper')
     # mapperProcess.start()
     for i,p in enumerate(processes):
         print('Starting process:',i)
-        time.sleep(1)
         p.start()
+        time.sleep(1)
 
-    time.sleep(5)
+    time.sleep(2)
     for i,p in enumerate(processes):
         print('Stopping process:', i)
         p.terminate()
@@ -60,7 +60,7 @@ def main():
         p.close()
     # print('Stopping Mapper')
     # time.sleep(1)
-    master.stop()
+    leader.stop()
     
 if __name__ == "__main__":
     main()

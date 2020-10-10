@@ -1,0 +1,3 @@
+[submodule "fs-key-value-store"]
+	path = fs-key-value-store
+	url = https://github.com/aniruddhavpatil/fs-key-value-store.git
