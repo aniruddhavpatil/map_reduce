@@ -1,27 +1,38 @@
 # from rpc import Server.Server, Client.Client    
 
 from rpc.Server import Server
-from rpc.Client import Client
 import multiprocessing as mp
 import time
 import os
 # import rpc.Client.Client as Client
 from filesystem.Client import Client as FS_client
 from Worker import Worker
+import importlib
+
 
 class Master:
-    def __init__(self, networkConfig, methods):
-        self.server = Server(networkConfig, [self.start_mapper, self.stop_mapper, *methods])
+    def __init__(self, networkConfig, methods, n_mappers, n_reducers, map_fn, reduce_fn, input_data, output_data):
+        self.server = Server(networkConfig, [self.start_mapper, self.stop_mapper, self.stop_reducer, self.start_reducer, *methods])
         self.mapper_count = 0
         self.reducer_count = 0
+        self.n_mappers = n_mappers
+        self.n_reducers = n_reducers
+
+        self.input_data = input_data
+        self.output_data = output_data
+
+        self.map_fn = map_fn
+        self.reduce_fn = reduce_fn
+        self.networkConfig = networkConfig
         self.base_dir = os.getcwd()
         self.fs_client = FS_client()
         self.fs_client.connect()
         self.file_dict = {}
+        self.mappers = []
+        self.reducers = []
 
 
     def input_partition(self, files, n):
-        # HAX
         for f in files:
             with open(os.path.join(self.base_dir, f), 'r') as curr_file:
                 data=curr_file.read()
@@ -45,149 +56,104 @@ class Master:
                     else:
                         self.file_list[key].append(chunk_name)
         return self.file_dict
-        # total_size = 0
-        # for f in files:
-        #     total_size+=os.path.getsize(os.path.join(self.base_dir, f))
-        
-        # split_size = total_size // n
-        # curr = 0
-        # curr_file = 0
-        # curr_file_size = os.path.getsize(os.path.join(self.base_dir, files[curr_file]))
-        # while curr_file < len(files):
-        return True
 
 
 
 
     def start_mapper(self):
-        print('Start Mapper')
         self.mapper_count += 1
 
     def stop_mapper(self, id):
-        print('Stopping Mapper')
         self.mapper_count -= 1
+        # print('Mapper:', id, 'finished job')
+    
+    def start_reducer(self):
+        self.reducer_count += 1
+
+    def stop_reducer(self, id):
+        self.reducer_count -= 1
+        # print('Reducer:', id, 'finished job')
+        
 
     def run(self):
         # self.server.run()
-        self.server_process = mp.Process(target=self.server.run)
-        print('Starting Master')
-        self.server_process.start()
-        # server_process.join()
-        # print('Stopping Master')
+        try:
+            self.server_process = mp.Process(target=self.server.run)
+            print('Starting Master')
+            self.server_process.start()
+            D = self.input_partition([self.input_data], self.n_mappers)
+            print('Starting mappers')
+            for i in range(self.n_mappers):
+                worker = Worker(self.networkConfig, i, 'map', self.n_mappers, D[i], 'output', self.map_fn)
+                self.mappers.append(mp.Process(target=worker.run))
+
+            for i,w in enumerate(self.mappers):
+                print('Mapper:', i, 'started')
+                w.start()
+
+            for i,w in enumerate(self.mappers):
+                print('Mapper:', i, 'completed')
+                w.join()
+
+            print('Starting reducers')
+            for i in range(self.n_reducers):
+                worker = Worker(self.networkConfig, i, 'reduce',
+                                self.n_reducers, None, self.output_data, self.reduce_fn)
+                self.reducers.append(mp.Process(target=worker.run))
+
+            for i, w in enumerate(self.reducers):
+                print('Reducer:', i, 'started')
+                w.start()
+
+            for i,w in enumerate(self.reducers):
+                print('Reducer:', i, 'completed')
+                w.join()
+
+
+        except KeyboardInterrupt:
+            self.stop()
+        self.stop()
+
+
+        
 
     def stop(self):
         print('Stopping Master')
-        self.server_process.terminate()
-        self.server_process.join()
-        self.server_process.close()
+        
+        for i,p in enumerate(self.mappers):
+            try:
+                p.terminate()
+                p.join()
+                p.close()
+            except:
+                pass
+        
+        for i,p in enumerate(self.reducers):
+            try:
+                p.terminate()
+                p.join()
+                p.close()
+            except:
+                pass
+
+        try:
+            self.server.kill()
+            self.server_process.terminate()
+            self.server_process.join()
+            self.server_process.close()
+        except:
+            pass
 
 def myFunc(i):
     print(i)
 
-def map_func(key, value):
-    ret = []
-    for w in value.split():
-        ret.append((w.strip(':'), 1))
-    return ret
-
-def red_func(tuple_data):
-    D = {}
-    for k, v in tuple_data:
-        if k not in D:
-            D[k]=1
-        else:
-            D[k]+=1
-    return tuple(list(zip(D.keys(), D.values())))
-
-def IE_map(key, value):
-    ret = []
-    for w in value.split():
-        ret.append((w.strip(':'), key))
-    return ret
-
-def IE_red(tuple_data):
-    D = {}
-    for k,v in tuple_data:
-        if k not in D:
-            D[k] = {}
-            D[k][v] = 1
-        else:
-            if v not in D[k]:
-                D[k][v] = 1
-            else:
-                D[k][v]+=1
-    for k in D:
-        curr_list = list(zip(D[k].keys(), D[k].values()))
-        curr_list.sort(key=lambda x: x[1], reverse=True)
-        D[k] = curr_list
-
-    ret = []
-    for item in list(zip(D.keys(), D.values())):
-        print(item)
-        value_string = ''
-        for value in item[1]:
-            value_string+=value[0] + ' ' + str(value[1]) + ','
-        ret.append((item[0], value_string[:-1]))
-    return ret
-
-
-def driver_reducer():
-    master = Master(('localhost', 8000), [myFunc])
-    master.run()
-    # mapper = Client(('localhost', 8000))
-    # D = master.input_partition(['corpus_utf.txt'], 4)
-    # print(D)
-    workers = []
-    for i in range(4):
-        worker = Worker(i, 'reduce', 4, None, 'output', IE_red)
-        # workers.append(worker)
-        worker.run()
-    master.stop()
-
-def driver_mapper():
-    master = Master(('localhost', 8000), [myFunc])
-    master.run()
-    mapper = Client(('localhost', 8000))
-    D = master.input_partition(['corpus_utf.txt'], 4)
-    print(D)
-    workers = []
-    for i in range(4):
-        worker = Worker(i, 'map', 4, D[i], 'output', IE_map)
-        # workers.append(worker)
-        worker.run()
-
-    # processes = []
-    # for i in range(5):
-    #     processes.append(mp.Process(target=mapper.run,
-    #                                 args=('myFunc', 'mapper:' + str(i),)))
-    # # print('Starting Mapper')
-    # # mapperProcess.start()
-    # for i, p in enumerate(processes):
-    #     print('Starting process:', i)
-    #     p.start()
-    #     time.sleep(1)
-
-    # time.sleep(2)
-    # for i, p in enumerate(processes):
-    #     print('Stopping process:', i)
-    #     p.terminate()
-    #     p.join()
-    #     p.close()
-    # print('Stopping Mapper')
-    # time.sleep(1)
-    master.stop()
-
 def main():
-    # driver_mapper()
-    driver_reducer()
-    # fs_client = FS_client()
-    # fs_client.connect()
-    # corpus = open('corpus_utf.txt', 'r')
-    # corpus_text = corpus.read()
-    # fs_client.set('corpus', corpus_text[:100])
-    # value = fs_client.get('corpus')
-    # print(value == corpus_text[:100])
-    
+    module = importlib.import_module('word_count_map')
+    map_fn = getattr(module, 'map_fn')
+    module = importlib.import_module('word_count_reduce')
+    reduce_fn = getattr(module, 'reduce_fn')
+    master = Master(('localhost', 8000), [myFunc], 4, 4, map_fn, reduce_fn)
+    master.run()
 
 if __name__ == "__main__":
     main()

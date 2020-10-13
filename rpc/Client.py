@@ -6,7 +6,7 @@ class Client:
         self.stub = xmlrpc.client.ServerProxy(self.url)
         try:
             if len(self.stub.system.listMethods()) > 0:
-                print('Connected to', self.url)
+                print('Connected to RPC server at', self.url)
         except:
             print('Server not running')
     def getURL(self, config):
